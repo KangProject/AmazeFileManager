@@ -23,6 +23,7 @@ package com.amaze.filemanager.fragments;
 import android.animation.Animator;
 import android.animation.AnimatorListenerAdapter;
 import android.animation.ArgbEvaluator;
+import android.animation.LayoutTransition;
 import android.animation.ObjectAnimator;
 import android.animation.ValueAnimator;
 import android.app.Activity;
@@ -39,6 +40,7 @@ import android.content.res.Resources;
 import android.graphics.Color;
 import android.graphics.ColorMatrix;
 import android.graphics.ColorMatrixColorFilter;
+import android.graphics.Rect;
 import android.graphics.drawable.Drawable;
 import android.media.RingtoneManager;
 import android.net.Uri;
@@ -100,6 +102,7 @@ import com.amaze.filemanager.utils.IconHolder;
 import com.amaze.filemanager.utils.IconUtils;
 import com.amaze.filemanager.utils.Icons;
 import com.amaze.filemanager.utils.Layoutelements;
+import com.amaze.filemanager.utils.OverlappingPaneLayout;
 import com.amaze.filemanager.utils.Shortcuts;
 import com.melnykov.fab.FloatingActionButton;
 
@@ -237,7 +240,6 @@ public class Main extends android.support.v4.app.Fragment {
         buttons = (LinearLayout) rootView.findViewById(R.id.buttons);
         pathbar = (LinearLayout) rootView.findViewById(R.id.pathbar);
         textView = (TextView) rootView.findViewById(R.id.fullpath);
-
         showThumbs=Sp.getBoolean("showThumbs", true);
         ic=new IconHolder(getActivity(),showThumbs,!aBoolean);
         res = getResources();
@@ -263,6 +265,7 @@ public class Main extends android.support.v4.app.Fragment {
             gridView.setVisibility(View.VISIBLE);
         }
 
+        setupPaneLayout((OverlappingPaneLayout) rootView);
         return rootView;
     }
 
@@ -270,16 +273,8 @@ public class Main extends android.support.v4.app.Fragment {
     public void onActivityCreated(Bundle savedInstanceState) {
         super.onActivityCreated(savedInstanceState);
         setHasOptionsMenu(false);
-        getActivity().findViewById(R.id.buttonbarframe).setVisibility(View.VISIBLE);
-
-        /*Animation animation1 = AnimationUtils.loadAnimation(getActivity(), R.anim.fab_newtab);
-        getActivity().findViewById(R.id.fab).setAnimation(animation1);*/
-
+        getActivity().findViewById(R.id.buttonbarframe).setVisibility(View.GONE);
         list1 = new ArrayList<String>();
-
-
-        //getActivity().findViewById(R.id.search).setVisibility(View.VISIBLE);
-        //getActivity().findViewById(R.id.action_overflow).setVisibility(View.VISIBLE);
         utils = new Futils();
         String x=getSelectionColor();
         skinselection=Color.parseColor(x);
@@ -1485,4 +1480,98 @@ public class Main extends android.support.v4.app.Fragment {
         });
 
     }
-}
+    private float mPreviousTranslationZ = 0;
+    private Rect mClipRect = new Rect();
+    private static final float CLIP_CARD_BARELY_HIDDEN_RATIO = 0.001f;
+    private static final float CLIP_CARD_MOSTLY_HIDDEN_RATIO = 0.9f;
+    // Fade out 5x faster than the hidden ratio.
+    private static final float CLIP_CARD_OPACITY_RATIO = 5f;
+    public void clipCard(float ratioHidden,View viewToClip) {
+        if (viewToClip == null) {
+            return;
+        }
+        int width = viewToClip.getWidth();
+        int height = viewToClip.getHeight();
+
+        if (ratioHidden <= CLIP_CARD_BARELY_HIDDEN_RATIO) {
+            viewToClip.setTranslationY(mPreviousTranslationZ);
+        } else if (viewToClip.getTranslationY() != 0){
+            mPreviousTranslationZ = viewToClip.getTranslationY();
+            viewToClip.setTranslationY(0);
+        }
+
+        if (ratioHidden > CLIP_CARD_MOSTLY_HIDDEN_RATIO) {
+            mClipRect.set(0, 0 , 0, 0);
+           viewToClip. setVisibility(View.INVISIBLE);
+        } else {
+            viewToClip.setVisibility(View.VISIBLE);
+            int newTop = (int) (ratioHidden * height);
+            mClipRect.set(0, newTop, width, height);
+
+            // Since the pane will be overlapping with the action bar, apply a vertical offset
+            // to top align the clipped card in the viewable area;
+            viewToClip.setTranslationY(-newTop);
+        }
+        viewToClip.setClipBounds(mClipRect);
+
+        // If the view has any children, fade them out of view.
+        final ViewGroup viewGroup = (ViewGroup) viewToClip;
+        setChildrenOpacity(
+                viewGroup, Math.max(0, 1 - (CLIP_CARD_OPACITY_RATIO  * ratioHidden)));
+    }
+
+    private void setChildrenOpacity(ViewGroup viewGroup, float alpha) {
+        final int count = viewGroup.getChildCount();
+        for (int i = 0; i < count; i++) {
+            viewGroup.getChildAt(i).setAlpha(alpha);
+        }   }
+    private void setupPaneLayout(OverlappingPaneLayout paneLayout) {
+        // TODO: Remove the notion of a capturable view. The entire view be slideable, once
+        // the framework better supports nested scrolling.
+        paneLayout.setCapturableView(listView);
+        paneLayout.openPane();
+        paneLayout.setPanelSlideCallbacks(mPanelSlideCallbacks);
+
+        LayoutTransition transition = paneLayout.getLayoutTransition();
+        // Turns on animations for all types of layout changes so that they occur for
+        // height changes.
+      //  transition.enableTransitionType(LayoutTransition.CHANGING);////////
+    }
+    private OverlappingPaneLayout.PanelSlideCallbacks mPanelSlideCallbacks = new OverlappingPaneLayout.PanelSlideCallbacks() {
+        boolean panelopen;
+        @Override
+        public void onPanelSlide(View panel, float slideOffset) {
+            // For every 1 percent that the panel is slid upwards, clip 1 percent off the top
+            // edge of the shortcut card, to achieve the animated effect of the shortcut card
+            // being pushed out of view when the panel is slid upwards. slideOffset is 1 when
+            // the shortcut card is fully exposed, and 0 when completely hidden.
+            float ratioCardHidden = (1 - slideOffset);
+            clipCard(ratioCardHidden,rootView.findViewById(R.id.buttonbarframe));
+            System.out.println("panelslide");
+            }
+
+        @Override
+        public void onPanelOpened(View panel) {
+        panelopen=true;
+        }
+
+        @Override
+        public void onPanelClosed(View panel) {
+        panelopen=false;
+        }
+
+        @Override
+        public void onPanelFlingReachesEdge(int velocityY) {
+            if (listView != null) {
+                listView.fling(velocityY);
+            }
+        }
+
+        @Override
+        public boolean isScrollableChildUnscrolled() {
+            return listView != null && (listView.getChildCount() == 0
+                    || listView.getChildAt(0).getTop() == listView.getPaddingTop());
+        }
+
+    };
+    }
